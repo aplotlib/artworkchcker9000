@@ -11,10 +11,9 @@ class Config:
     # File Upload Settings
     ALLOWED_EXTENSIONS = ["pdf", "jpg", "jpeg", "png"]
     
-    # File Paths
-    VIVE_CHECKLIST = "Artwork Checklist.xlsx - Vive.csv"
-    CORETECH_CHECKLIST = "Artwork Checklist.xlsx - Coretech.csv"
-    ERROR_TRACKER = "Artwork Error Tracker (1).xlsx - Sheet1.csv"
+    # Unified File Paths (Matches your local filenames)
+    CHECKLIST_FILE = "Artwork Checklist.xlsx"
+    ERROR_TRACKER_FILE = "Artwork Error Tracker (1).xlsx"
 
     # System Prompt
     SYSTEM_PROMPT = """
@@ -31,7 +30,6 @@ class Config:
     """
     
     # Knowledge Base for Tooltips (Derived from Error Tracker)
-    # Keys are searched in checklist items to trigger these tips
     RISK_TIPS = {
         "barcode": "⚠️ Check scannability! We have had issues with 2 different barcode descriptions appearing. (Ref: LVA1035)",
         "qr code": "⚠️ Ensure the QR code is actually in the file. It has been missing in past drafts. (Ref: LVA3100)",
@@ -51,7 +49,6 @@ def load_css():
         .pass-box { border-left: 5px solid #28a745; background-color: #e6fffa; padding: 10px; border-radius: 5px; }
         .fail-box { border-left: 5px solid #dc3545; background-color: #ffe6e6; padding: 10px; border-radius: 5px; }
         .warn-box { border-left: 5px solid #ffc107; background-color: #fff3cd; padding: 10px; border-radius: 5px; }
-        /* Manual Checklist Styling */
         .stCheckbox { padding: 10px; background: white; border-radius: 5px; margin-bottom: 5px; border: 1px solid #eee; }
         </style>
     """, unsafe_allow_html=True)
