@@ -2,6 +2,7 @@ import json
 import base64
 from openai import OpenAI
 from config import Config
+import streamlit as st
 
 class AIAnalyzer:
     def __init__(self, api_key, model_name):
@@ -12,46 +13,51 @@ class AIAnalyzer:
         if not image_parts:
             return {"findings": []}
 
-        # Encode image
-        img_data = base64.b64encode(image_parts[0]['data']).decode('utf-8')
-        mime = image_parts[0]['mime_type']
-
-        # Prepare context
-        checklist_txt = "\n".join([f"- {r['requirement']}" for r in checklist[:15]]) # Top 15 rules to save tokens
-        errors_txt = "\n".join([f"- {e['issue description']}" for e in errors[:5]]) # Top 5 recent errors
+        # Prepare Checklist & Context
+        checklist_txt = "\n".join([f"- {r['requirement']}" for r in checklist[:20]])
+        errors_txt = "\n".join([f"- {e['issue description']}" for e in errors[:5]])
 
         user_prompt = f"""
-        Analyze the artwork image (Filename: {filename}).
+        Analyze the artwork files (Filename: {filename}).
+        There are {len(image_parts)} images provided (e.g. front, back, box, insert).
         
         1. CHECKLIST REQUIREMENTS (Verify these exist):
         {checklist_txt}
 
-        2. HISTORICAL ERRORS (Watch out for these specifically):
+        2. HISTORICAL ERRORS (Watch out for these):
         {errors_txt}
 
-        3. SPECIFIC CHECKS:
-        - SKU Consistency: Does the text description match the visual product color/type?
-        - Origin: Is "Made in China" visible?
-        - Layout: Are items cut off or too close to the edge?
+        3. GENERAL CHECKS:
+        - Compare visual text on all sides.
+        - Check for "Made in China".
+        - Ensure barcodes are clear and not cut off.
         
         Return a finding for each major requirement.
         """
 
+        # Build Message Payload
+        messages = [
+            {"role": "system", "content": Config.SYSTEM_PROMPT + "\nOutput strictly valid JSON: {'findings': [{'check': '...', 'status': 'PASS/FAIL/WARNING', 'observation': '...'}]}"},
+        ]
+
+        # Construct User Message with MULTIPLE Images
+        content_payload = [{"type": "text", "text": user_prompt}]
+        
+        for img in image_parts:
+            img_b64 = base64.b64encode(img['data']).decode('utf-8')
+            content_payload.append({
+                "type": "image_url", 
+                "image_url": {"url": f"data:{img['mime_type']};base64,{img_b64}"}
+            })
+
+        messages.append({"role": "user", "content": content_payload})
+
         try:
             response = self.client.chat.completions.create(
                 model=self.model_name,
-                messages=[
-                    {"role": "system", "content": Config.SYSTEM_PROMPT + "\nOutput strictly valid JSON format: {'findings': [{'check': '...', 'status': 'PASS/FAIL/WARNING', 'observation': '...'}]}"},
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": user_prompt},
-                            {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{img_data}"}}
-                        ]
-                    }
-                ],
+                messages=messages,
                 temperature=0.1,
-                max_tokens=1500,
+                max_tokens=2000,
                 response_format={ "type": "json_object" }
             )
             
@@ -59,4 +65,4 @@ class AIAnalyzer:
             return json.loads(content)
 
         except Exception as e:
-            return {"findings": [{"check": "AI Processing", "status": "FAIL", "observation": str(e)}]}
+            return {"findings": [{"check": "AI Processing", "status": "FAIL", "observation": f"Error: {str(e)}"}]}
