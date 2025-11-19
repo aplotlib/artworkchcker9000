@@ -11,6 +11,12 @@ from datetime import datetime
 st.set_page_config(page_title=Config.PAGE_TITLE, page_icon=Config.PAGE_ICON, layout=Config.LAYOUT)
 load_css()
 
+# --- Session State Management ---
+if 'analysis_report' not in st.session_state:
+    st.session_state.analysis_report = None
+if 'uploaded_file_names' not in st.session_state:
+    st.session_state.uploaded_file_names = []
+
 # --- Sidebar ---
 with st.sidebar:
     st.title(f"{Config.PAGE_ICON} Verified.")
@@ -19,74 +25,74 @@ with st.sidebar:
     
     st.divider()
     
-    # --- AGGRESSIVE API KEY LOADING ---
+    # --- ROBUST API KEY LOADING ---
     api_key = None
-    secrets_status = "searching"
+    
+    # 1. Check Secrets (Case Insensitive)
+    possible_keys = ["OPENAI_API_KEY", "openai_api_key", "OPENAI_KEY", "openai_key"]
+    found_key_name = None
 
-    # 1. Try loading from Streamlit Secrets
     try:
-        if "OPENAI_API_KEY" in st.secrets:
-            api_key = st.secrets["OPENAI_API_KEY"]
-            secrets_status = "success"
-        else:
-            secrets_status = "missing_key"
+        for key in possible_keys:
+            if key in st.secrets:
+                api_key = st.secrets[key]
+                found_key_name = key
+                break
     except FileNotFoundError:
-        secrets_status = "no_secrets_file"
-    except Exception as e:
-        secrets_status = f"error_{str(e)}"
+        pass
+    except Exception:
+        pass
 
-    # 2. UI Feedback & Manual Fallback
+    # 2. UI Feedback
     if api_key:
-        st.success("⚡ AI System Online")
+        st.success(f"⚡ AI Online")
+        st.caption(f"Using key: `{found_key_name}`")
     else:
         st.warning("⚠️ AI Offline")
-        # Debug Info: Tell user exactly why secrets failed
-        if secrets_status == "no_secrets_file":
-            st.caption("No `.streamlit/secrets.toml` found.")
-        elif secrets_status == "missing_key":
-            st.caption("Secrets file found, but `OPENAI_API_KEY` is missing.")
         
-        api_key = st.text_input("Enter OpenAI API Key", type="password", help="Enter key manually since secrets failed.")
+        # Debugging Help
+        try:
+            if hasattr(st, 'secrets') and st.secrets:
+                st.markdown("**Debug: Found these keys in secrets:**")
+                st.code("\n".join(list(st.secrets.keys())))
+            else:
+                st.caption("No secrets found.")
+        except:
+            pass
+
+        api_key = st.text_input("Manually Enter API Key", type="password")
 
 # --- Header ---
 st.markdown("## Artwork Verification Dashboard")
 
 # --- Load Data (Single Source) ---
 cm = ChecklistManager()
-
-# 1. Load Checklist (Fail-Safe)
-checklist_path = Config.CHECKLIST_FILE
 rules = []
-
-if os.path.exists(checklist_path):
-    rules = cm.load_checklist(checklist_path, brand)
-else:
-    st.error(f"⚠️ Missing File: '{checklist_path}'")
-    st.info("Please upload your Checklist to proceed.")
-    # FIX: Explicitly allow xlsx here
-    uploaded_checklist = st.file_uploader("Upload Checklist (.xlsx)", type=["xlsx", "csv"], key="chk_upload")
-    if uploaded_checklist:
-        rules = cm.load_checklist(uploaded_checklist, brand)
-
-# 2. Load Error Tracker (Fail-Safe)
-error_tracker_path = Config.ERROR_TRACKER_FILE
 common_errors = []
 
-if os.path.exists(error_tracker_path):
-    common_errors = cm.get_common_errors(error_tracker_path)
-elif not rules: 
-    st.warning(f"⚠️ Missing File: '{error_tracker_path}'")
-    # FIX: Explicitly allow xlsx here
-    uploaded_tracker = st.file_uploader("Upload Error Tracker (.xlsx)", type=["xlsx", "csv"], key="err_upload")
-    if uploaded_tracker:
-        common_errors = cm.get_common_errors(uploaded_tracker)
+# 1. Load Checklist
+if os.path.exists(Config.CHECKLIST_FILE):
+    rules = cm.load_checklist(Config.CHECKLIST_FILE, brand)
+else:
+    st.error(f"⚠️ Missing: {Config.CHECKLIST_FILE}")
+    uploaded_chk = st.file_uploader("Upload Checklist (.xlsx)", type=["xlsx", "csv"], key="chk")
+    if uploaded_chk:
+        rules = cm.load_checklist(uploaded_chk, brand)
 
-# Stop if no rules loaded
+# 2. Load Error Tracker
+if os.path.exists(Config.ERROR_TRACKER_FILE):
+    common_errors = cm.get_common_errors(Config.ERROR_TRACKER_FILE)
+elif not rules:
+    st.warning(f"⚠️ Missing: {Config.ERROR_TRACKER_FILE}")
+    uploaded_err = st.file_uploader("Upload Error Tracker (.xlsx)", type=["xlsx", "csv"], key="err")
+    if uploaded_err:
+        common_errors = cm.get_common_errors(uploaded_err)
+
 if not rules:
-    st.warning("👆 Waiting for checklist file...")
+    st.warning("👆 Please upload the checklist to continue.")
     st.stop()
 
-# --- Tabs Interface ---
+# --- Tabs ---
 tab_ai, tab_manual = st.tabs(["🤖 AI Analysis", "📋 Manual Inspection"])
 
 # ==========================================
@@ -94,114 +100,113 @@ tab_ai, tab_manual = st.tabs(["🤖 AI Analysis", "📋 Manual Inspection"])
 # ==========================================
 with tab_ai:
     if not api_key:
-        st.info("Please configure your OpenAI API key in the sidebar.")
+        st.info("Enter OpenAI API Key to enable this tab.")
     else:
         st.markdown("### Automated Visual Inspection")
-        uploaded_file = st.file_uploader("Upload Proof (PDF/Image)", type=Config.ALLOWED_EXTENSIONS, key="ai_uploader")
+        
+        # CHANGED: accept_multiple_files=True
+        uploaded_files = st.file_uploader(
+            "Upload Proofs (Front, Back, Inserts)", 
+            type=Config.ALLOWED_EXTENSIONS, 
+            accept_multiple_files=True,
+            key="ai_uploader"
+        )
 
-        if uploaded_file:
+        if uploaded_files:
+            # Clear previous report if new files are uploaded
+            current_file_names = [f.name for f in uploaded_files]
+            if current_file_names != st.session_state.uploaded_file_names:
+                st.session_state.analysis_report = None
+                st.session_state.uploaded_file_names = current_file_names
+
+            # Process Files
             processor = FileProcessor()
-            text, img_parts, preview = processor.process_file(uploaded_file)
+            # New method for multiple files
+            text, img_parts, preview = processor.process_files(uploaded_files)
 
             col1, col2 = st.columns([4, 5])
 
             with col1:
-                st.caption("Preview")
+                st.caption(f"Preview ({len(uploaded_files)} files)")
                 if preview:
                     st.image(preview, use_column_width=True)
-                with st.expander("🔍 Inspect Extracted Text"):
-                    st.text(text[:2000])
+                
+                with st.expander("🔍 Extracted Text"):
+                    st.text(text[:2000] + "..." if len(text) > 2000 else text)
 
             with col2:
-                if st.button("🚀 Run AI Inspection", type="primary", use_container_width=True):
-                    with st.spinner("Consulting compliance database..."):
-                        
+                # Run Button
+                if st.button("🚀 Run Inspection", type="primary", use_container_width=True):
+                    with st.spinner("Analyzing all files against checklist..."):
                         ai = AIAnalyzer(api_key, Config.MODEL_NAME)
-                        ai_results = ai.analyze(img_parts, rules, common_errors, uploaded_file.name)
+                        
+                        # Pass all images to AI
+                        ai_results = ai.analyze(img_parts, rules, common_errors, ", ".join(current_file_names))
                         
                         validator = ArtworkValidator(rules, common_errors)
-                        report = validator.validate(text, uploaded_file.name, ai_results)
+                        report = validator.validate(text, ", ".join(current_file_names), ai_results)
                         
-                        # Metrics
-                        s = report['summary']
-                        c1, c2, c3 = st.columns(3)
-                        c1.metric("Pass", s['pass'])
-                        c2.metric("Fail", s['fail'], delta_color="inverse")
-                        c3.metric("Review", s['warn'], delta_color="off")
+                        # Save to session state
+                        st.session_state.analysis_report = report
+
+                # Display Results (from Session State)
+                if st.session_state.analysis_report:
+                    report = st.session_state.analysis_report
+                    s = report['summary']
+                    
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Pass", s['pass'])
+                    c2.metric("Fail", s['fail'], delta_color="inverse")
+                    c3.metric("Review", s['warn'], delta_color="off")
+                    
+                    st.divider()
+                    
+                    for check in report['checks']:
+                        status = check['status'].upper()
+                        css_class = "pass-box" if status == "PASS" else "fail-box" if status == "FAIL" else "warn-box"
+                        icon = "✅" if status == "PASS" else "❌" if status == "FAIL" else "⚠️"
                         
-                        st.divider()
-                        
-                        for check in report['checks']:
-                            status = check['status'].upper()
-                            css_class = "pass-box" if status == "PASS" else "fail-box" if status == "FAIL" else "warn-box"
-                            icon = "✅" if status == "PASS" else "❌" if status == "FAIL" else "⚠️"
-                            
-                            st.markdown(f"""
-                            <div class="{css_class}">
-                                <strong>{icon} {check['name']}</strong><br>
-                                <span style="font-size:0.9em;">{check['observation']}</span>
-                            </div>
-                            <div style="margin-bottom: 10px;"></div>
-                            """, unsafe_allow_html=True)
+                        st.markdown(f"""
+                        <div class="{css_class}">
+                            <strong>{icon} {check['name']}</strong><br>
+                            <span style="font-size:0.9em;">{check['observation']}</span>
+                        </div>
+                        <div style="margin-bottom: 10px;"></div>
+                        """, unsafe_allow_html=True)
 
 # ==========================================
 # TAB 2: MANUAL INSPECTION
 # ==========================================
 with tab_manual:
-    st.markdown(f"### {brand} Compliance Checklist")
+    st.markdown(f"### {brand} Checklist")
     
-    # Group rules by category
+    # Group rules
     categories = {}
     for rule in rules:
         cat = rule.get('category', 'General')
-        if cat not in categories:
-            categories[cat] = []
+        if cat not in categories: categories[cat] = []
         categories[cat].append(rule)
     
     with st.form("manual_checklist_form"):
         checked_items = []
         total_items = len(rules)
         
-        priority_order = ["Compliance", "Origin", "Physical Spec", "Branding", "General"]
-        sorted_cats = sorted(categories.keys(), key=lambda x: priority_order.index(x) if x in priority_order else 99)
-
-        for category in sorted_cats:
+        cats_sorted = sorted(categories.keys())
+        
+        for category in cats_sorted:
             st.markdown(f"#### 📂 {category}")
             for rule in categories[category]:
-                col_check, col_tip = st.columns([0.6, 0.4])
-                with col_check:
-                    label = f"**{rule['requirement']}**"
-                    if st.checkbox(label, key=f"chk_{rule['id']}"):
+                c1, c2 = st.columns([0.7, 0.3])
+                with c1:
+                    if st.checkbox(f"**{rule['requirement']}**", key=f"m_{rule['id']}"):
                         checked_items.append(rule)
-                with col_tip:
+                with c2:
                     if rule.get('tip'):
-                        st.info(f"{rule['tip']}", icon="💡")
+                        st.info(rule['tip'], icon="💡")
             st.divider()
 
-        f_col1, f_col2 = st.columns([3, 1])
-        with f_col1:
-            notes = st.text_area("QC Notes")
-        with f_col2:
-            submitted = st.form_submit_button("Generate Report", type="primary", use_container_width=True)
-
-    if submitted:
-        score = int((len(checked_items) / total_items) * 100) if total_items > 0 else 0
-        report_lines = [
-            "ARTWORK VERIFICATION REPORT",
-            f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-            f"Brand: {brand}",
-            f"Inspector: Manual QC",
-            "-" * 30,
-            f"SCORE: {score}% ({len(checked_items)}/{total_items} items checked)",
-            "-" * 30,
-            "NOTES:",
-            notes
-        ]
-        
-        st.success(f"Report Generated! Score: {score}%")
-        st.download_button(
-            label="📥 Download Report",
-            data="\n".join(report_lines),
-            file_name=f"QC_{brand}_{datetime.now().strftime('%Y%m%d')}.txt",
-            mime="text/plain"
-        )
+        notes = st.text_area("QC Notes")
+        if st.form_submit_button("Generate Report", type="primary"):
+            score = int((len(checked_items)/total_items)*100) if total_items else 0
+            r_text = f"QC REPORT - {brand}\nScore: {score}%\nNotes: {notes}"
+            st.download_button("Download Report", r_text, f"QC_{brand}.txt")
