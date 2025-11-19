@@ -17,6 +17,8 @@ if 'history' not in st.session_state:
     st.session_state.history = []
 if 'analysis_report' not in st.session_state:
     st.session_state.analysis_report = None
+if 'manual_report_text' not in st.session_state:
+    st.session_state.manual_report_text = None
 
 # --- Sidebar ---
 with st.sidebar:
@@ -45,7 +47,7 @@ with st.sidebar:
     st.divider()
     
     # --- History Log ---
-    st.subheader("Recent Checks")
+    st.subheader("Session Log")
     if st.session_state.history:
         for item in reversed(st.session_state.history[-5:]):
             st.text(f"{item['time']} - {item['result']}")
@@ -67,22 +69,9 @@ else:
     st.error(f"Missing: {Config.CHECKLIST_FILE}")
     rules = cm.load_checklist(st.file_uploader("Upload Checklist", type=["xlsx", "csv"]), brand)
 
-# 2. Load & Visualize Error Tracker
+# 2. Load Error Tracker (Data Only, No Charts)
 if os.path.exists(Config.ERROR_TRACKER_FILE):
     common_errors = cm.get_common_errors(Config.ERROR_TRACKER_FILE)
-    error_stats = cm.get_error_stats(Config.ERROR_TRACKER_FILE)
-    
-    # --- DASHBOARD ANALYTICS ---
-    if error_stats and not st.session_state.analysis_report:
-        st.markdown("### 📊 Risk Intelligence")
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Active Compliance Rules", len(rules))
-        c2.metric("Known Risk Factors", len(common_errors))
-        c3.metric("Most Common Error", max(error_stats, key=error_stats.get) if error_stats else "N/A")
-        
-        st.bar_chart(error_stats, color="#FF4B4B")
-        st.caption("Frequency of historical defects by category.")
-        st.divider()
 
 if not rules:
     st.stop()
@@ -183,6 +172,7 @@ with tab_manual:
         if cat not in categories: categories[cat] = []
         categories[cat].append(rule)
     
+    # --- FORM START ---
     with st.form("manual_form"):
         checked = []
         total = len(rules)
@@ -192,6 +182,7 @@ with tab_manual:
             for rule in categories[cat]:
                 c1, c2 = st.columns([0.8, 0.2])
                 with c1:
+                    # Using rule['id'] for unique keys is critical
                     if st.checkbox(rule['requirement'], key=f"m_{rule['id']}"):
                         checked.append(rule)
                 with c2:
@@ -200,18 +191,41 @@ with tab_manual:
             st.divider()
             
         notes = st.text_area("Inspector Notes")
-        if st.form_submit_button("Generate Certification", type="primary"):
+        
+        # Form Submit Button (Updates Session State, does NOT download)
+        submitted = st.form_submit_button("Generate Certification", type="primary")
+        
+        if submitted:
             score = int((len(checked)/total)*100) if total else 0
-            st.balloons() if score == 100 else None
             
+            # Generate the Report Text
             r_text = f"""
             CERTIFICATE OF COMPLIANCE
             -------------------------
             PROTOCOL: {brand}
             DATE: {datetime.now()}
-            SCORE: {score}%
+            SCORE: {score}% ({len(checked)}/{total} items passed)
             
-            NOTES: {notes}
+            INSPECTOR NOTES:
+            {notes}
+            
+            PASSED CHECKS:
             """
-            st.success("Report Generated")
-            st.download_button("Download Certificate", r_text, f"QC_Cert_{brand}.txt")
+            for item in checked:
+                r_text += f"\n[x] {item['requirement']}"
+                
+            # Save to Session State (so it exists outside the form)
+            st.session_state.manual_report_text = r_text
+            st.session_state.manual_score = score
+
+    # --- DOWNLOAD BUTTON (Outside Form) ---
+    if st.session_state.manual_report_text:
+        if st.session_state.get("manual_score", 0) == 100:
+            st.balloons()
+        
+        st.success("Report Ready")
+        st.download_button(
+            label="📥 Download Certificate", 
+            data=st.session_state.manual_report_text, 
+            file_name=f"QC_Cert_{brand}_{datetime.now().strftime('%Y%m%d')}.txt"
+        )
