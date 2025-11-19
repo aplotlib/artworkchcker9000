@@ -8,37 +8,32 @@ class Config:
     # AI Configuration
     MODEL_NAME = "gpt-4o"
     
-    # File Upload Settings
+    # File Upload Settings (For Artwork)
     ALLOWED_EXTENSIONS = ["pdf", "jpg", "jpeg", "png"]
     
-    # Unified File Paths (Matches your local filenames)
+    # Exact filenames you provided
     CHECKLIST_FILE = "Artwork Checklist.xlsx"
     ERROR_TRACKER_FILE = "Artwork Error Tracker (1).xlsx"
 
     # System Prompt
     SYSTEM_PROMPT = """
-    You are a Senior Quality Assurance Engineer for medical devices.
-    Your job is to fail artwork that does not meet strict standards.
-    
+    You are a Senior Quality Assurance Engineer.
     CORE RESPONSIBILITIES:
     1. TEXT ACCURACY: Compare extracted text vs visual layout.
     2. COMPLIANCE: Look for "Made in China", UDI, UPC, and Lot Numbers.
     3. BRANDING: Verify logo colors (Teal 319c) and font consistency.
     4. SKEPTICISM: If a barcode looks blurry or too close to the edge, flag it.
-    
-    Refer to historical errors provided in the context to catch repeat mistakes.
     """
     
-    # Knowledge Base for Tooltips (Derived from Error Tracker)
     RISK_TIPS = {
-        "barcode": "⚠️ Check scannability! We have had issues with 2 different barcode descriptions appearing. (Ref: LVA1035)",
-        "qr code": "⚠️ Ensure the QR code is actually in the file. It has been missing in past drafts. (Ref: LVA3100)",
-        "color": "⚠️ Compare against GOLDEN SAMPLE, not just PDF. Photoshoots often use Silver samples which are incorrect. (Ref: LVA3102)",
-        "china": "⚠️ Critical: 'Made in China' must be present. 500 units failed previously due to this missing text. (Ref: SUP3107)",
-        "box": "⚠️ Verify physical dimensions. Previous boxes were 'not high enough' causing bulging. (Ref: CSH1040)",
-        "logo": "⚠️ Standardize Teal coloring (319c). Don't mix Black/Teal embroidery without confirmation.",
-        "website": "⚠️ Check for valid URL and consistency. (Ref: LVA2038)",
-        "sku": "⚠️ Ensure SKU matches the product color (e.g. Gray product should not have BLK sku). (Ref: LVA3108)"
+        "barcode": "⚠️ Check scannability! (Ref: LVA1035)",
+        "qr code": "⚠️ Ensure QR code is present. (Ref: LVA3100)",
+        "color": "⚠️ Compare against GOLDEN SAMPLE. (Ref: LVA3102)",
+        "china": "⚠️ Critical: 'Made in China' must be present. (Ref: SUP3107)",
+        "box": "⚠️ Verify physical dimensions. (Ref: CSH1040)",
+        "logo": "⚠️ Standardize Teal coloring (319c).",
+        "website": "⚠️ Check for valid URL. (Ref: LVA2038)",
+        "sku": "⚠️ Ensure SKU matches product color. (Ref: LVA3108)"
     }
 
 def load_css():
