@@ -1,10 +1,10 @@
 import streamlit as st
+import os
 from config import Config, load_css
 from file_processor import FileProcessor
 from checklist_manager import ChecklistManager
 from validator import ArtworkValidator
 from ai_analyzer import AIAnalyzer
-import io
 from datetime import datetime
 
 # --- Init ---
@@ -19,7 +19,8 @@ with st.sidebar:
     
     st.divider()
     
-    # Improved API Key Handling: Checks Secrets first, then allows manual entry if needed
+    # --- API Key Handling ---
+    # Checks Secrets first, then allows manual entry if needed
     api_key = st.secrets.get("OPENAI_API_KEY")
     if not api_key:
         api_key = st.text_input("Enter OpenAI API Key", type="password")
@@ -34,14 +35,52 @@ with st.sidebar:
 st.markdown("## Artwork Verification Dashboard")
 st.markdown(f"**Active Protocol:** {brand}")
 
-# --- Main Logic ---
-# Load Data Once
+# --- Main Logic & File Loading Fail-Safe ---
 cm = ChecklistManager()
-checklist_path = Config.VIVE_CHECKLIST if brand == "Vive Health" else Config.CORETECH_CHECKLIST
-rules = cm.load_checklist(checklist_path, brand)
-common_errors = cm.get_common_errors(Config.ERROR_TRACKER)
 
-# Create Tabs
+# 1. Determine Expected File Paths
+if brand == "Vive Health":
+    checklist_path = Config.VIVE_CHECKLIST
+    checklist_name = "Vive Checklist"
+else:
+    checklist_path = Config.CORETECH_CHECKLIST
+    checklist_name = "Coretech Checklist"
+
+error_tracker_path = Config.ERROR_TRACKER
+
+# 2. Load Checklist (Fail-Safe)
+rules = []
+if os.path.exists(checklist_path):
+    # File exists in Repo
+    rules = cm.load_checklist(checklist_path, brand)
+else:
+    # File Missing -> Ask User
+    st.error(f"⚠️ Missing File: '{checklist_path}'")
+    st.info(f"Please upload the **{checklist_name}** CSV file to proceed, or add it to your repository.")
+    uploaded_checklist = st.file_uploader(f"Upload {checklist_name}", type=["csv"], key="chk_upload")
+    
+    if uploaded_checklist:
+        rules = cm.load_checklist(uploaded_checklist, brand)
+
+# 3. Load Error Tracker (Fail-Safe)
+common_errors = []
+if os.path.exists(error_tracker_path):
+    common_errors = cm.get_common_errors(error_tracker_path)
+else:
+    # Only show warning if not found, don't block app (it's optional but recommended)
+    with st.sidebar:
+        st.warning(f"⚠️ Error Tracker Missing")
+        st.caption(f"Could not find '{error_tracker_path}'. Upload below to enable history checks.")
+        uploaded_tracker = st.file_uploader("Upload Error Tracker", type=["csv"], key="err_upload")
+        if uploaded_tracker:
+            common_errors = cm.get_common_errors(uploaded_tracker)
+
+# --- Stop if no rules loaded ---
+if not rules:
+    st.warning("👆 Please resolve the missing checklist file above to start.")
+    st.stop()
+
+# --- Tabs Interface ---
 tab_ai, tab_manual = st.tabs(["🤖 AI Analysis", "📋 Manual Inspection"])
 
 # ==========================================
