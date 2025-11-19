@@ -8,26 +8,30 @@ class ChecklistManager:
 
     def load_checklist(self, file_path, brand_name):
         """
-        Scans the CSV for requirements and enhances them with 'Pro Tips'
-        derived from the error tracker knowledge base.
+        Scans the file (Excel or CSV) for requirements.
         """
         try:
-            # Load CSV
-            df = pd.read_csv(file_path, header=None)
+            # 1. Determine File Type & Load
+            if str(file_path).endswith('.xlsx'):
+                # Load Excel (header=None to scan all cells)
+                df = pd.read_excel(file_path, header=None)
+            else:
+                # Fallback to CSV
+                df = pd.read_csv(file_path, header=None)
             
             rules = []
             rule_id = 0
             
-            # 1. Parse Rules
+            # 2. Parse Rules (Iterate all columns)
             for col in df.columns:
                 for item in df[col].dropna():
                     item_str = str(item).strip()
                     
-                    # Detect bullet points or key requirement phrases
+                    # Detect checklist items (starting with - or •)
                     if item_str.startswith('-') or item_str.startswith('•') or len(item_str) > 5:
                         clean_req = item_str.lstrip('- •').strip()
                         
-                        # Basic filter to remove headers/titles if they sneak in
+                        # Filter noise
                         if len(clean_req) < 3 or "CHECKLIST" in clean_req.upper():
                             continue
 
@@ -44,7 +48,7 @@ class ChecklistManager:
                         elif 'china' in lower_req or 'origin' in lower_req:
                             category = "Origin"
                         
-                        # Inject Pro Tips based on Config/History
+                        # Inject Pro Tips
                         tip = None
                         for key, advice in Config.RISK_TIPS.items():
                             if key in lower_req:
@@ -52,7 +56,7 @@ class ChecklistManager:
                                 break
                                 
                         rules.append({
-                            "id": f"{brand_name}_{rule_id}",
+                            "id": f"rule_{rule_id}",
                             "requirement": clean_req,
                             "category": category,
                             "tip": tip,
@@ -71,15 +75,29 @@ class ChecklistManager:
             return unique_rules
 
         except Exception as e:
-            st.error(f"Failed to load checklist {file_path}: {e}")
+            st.error(f"Failed to load checklist '{file_path}': {e}")
             return []
 
     def get_common_errors(self, tracker_path):
         try:
-            df = pd.read_csv(tracker_path)
+            # Load Excel or CSV for error tracker too
+            if str(tracker_path).endswith('.xlsx'):
+                df = pd.read_excel(tracker_path)
+            else:
+                df = pd.read_csv(tracker_path)
+                
             df.columns = [c.lower().strip() for c in df.columns]
-            if 'issue description' in df.columns and 'issue category' in df.columns:
-                return df[['issue description', 'issue category']].dropna().to_dict('records')
+            
+            # Look for flexible column names
+            desc_col = next((c for c in df.columns if 'description' in c), None)
+            cat_col = next((c for c in df.columns if 'category' in c), None)
+            
+            if desc_col and cat_col:
+                # Standardize output keys
+                return df[[desc_col, cat_col]].rename(
+                    columns={desc_col: 'issue description', cat_col: 'issue category'}
+                ).dropna().to_dict('records')
+            
             return []
         except Exception:
             return []
