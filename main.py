@@ -15,21 +15,25 @@ load_css()
 with st.sidebar:
     st.title(f"{Config.PAGE_ICON} Verified.")
     st.markdown("### Protocol")
-    # Brand selector affects report metadata, even if checklist is shared
     brand = st.radio("Brand Protocol", ["Vive Health", "Coretech"])
     
     st.divider()
     
-    # --- ROBUST API KEY ENTRY ---
-    api_key = st.secrets.get("OPENAI_API_KEY")
-    
-    if not api_key:
-        st.markdown("### 🔑 AI Access")
-        api_key = st.text_input("Enter OpenAI API Key", type="password", help="Required for AI Analysis tab")
-        if not api_key:
-            st.warning("⚠️ AI Disabled")
+    # --- IMPROVED API KEY HANDLING ---
+    # 1. Try to load strictly from secrets first
+    api_key = None
+    try:
+        if "OPENAI_API_KEY" in st.secrets:
+            api_key = st.secrets["OPENAI_API_KEY"]
+    except Exception:
+        pass # Secrets file might not exist
+
+    # 2. Only show manual entry if secrets failed
+    if api_key:
+        st.success("⚡ AI System Online (Key Found)")
     else:
-        st.success("⚡ AI System Online")
+        st.warning("⚠️ AI Offline")
+        api_key = st.text_input("Enter OpenAI API Key", type="password", help="Add OPENAI_API_KEY to secrets.toml to hide this.")
 
 # --- Header ---
 st.markdown("## Artwork Verification Dashboard")
@@ -37,7 +41,8 @@ st.markdown("## Artwork Verification Dashboard")
 # --- Load Data (Single Source) ---
 cm = ChecklistManager()
 
-# 1. Load Checklist (Try Repo file first, else ask for upload)
+# 1. Load Checklist (Fail-Safe)
+# Uses Config paths first, then falls back to uploader if file is missing
 checklist_path = Config.CHECKLIST_FILE
 rules = []
 
@@ -45,23 +50,27 @@ if os.path.exists(checklist_path):
     rules = cm.load_checklist(checklist_path, brand)
 else:
     st.error(f"⚠️ Missing File: '{checklist_path}'")
-    st.info("Please upload your Excel checklist to proceed.")
+    st.info("Please upload your Checklist to proceed.")
+    # FIX: Added 'xlsx' to allowed types here
     uploaded_checklist = st.file_uploader("Upload Checklist (.xlsx)", type=["xlsx", "csv"], key="chk_upload")
     if uploaded_checklist:
         rules = cm.load_checklist(uploaded_checklist, brand)
 
-# 2. Load Error Tracker
+# 2. Load Error Tracker (Fail-Safe)
 error_tracker_path = Config.ERROR_TRACKER_FILE
 common_errors = []
 
 if os.path.exists(error_tracker_path):
     common_errors = cm.get_common_errors(error_tracker_path)
-elif not rules: # Only show this upload if we don't have rules yet, or sidebar
-    with st.sidebar:
-         # Optional upload in sidebar if missing
-         pass
+elif not rules: 
+    # Only show this upload prompt if we are in the setup phase (no rules yet)
+    st.warning(f"⚠️ Missing File: '{error_tracker_path}'")
+    # FIX: Added 'xlsx' to allowed types here
+    uploaded_tracker = st.file_uploader("Upload Error Tracker (.xlsx)", type=["xlsx", "csv"], key="err_upload")
+    if uploaded_tracker:
+        common_errors = cm.get_common_errors(uploaded_tracker)
 
-# Stop if no rules
+# Stop if no rules loaded
 if not rules:
     st.warning("👆 Waiting for checklist file...")
     st.stop()
@@ -74,7 +83,7 @@ tab_ai, tab_manual = st.tabs(["🤖 AI Analysis", "📋 Manual Inspection"])
 # ==========================================
 with tab_ai:
     if not api_key:
-        st.info("Please enter your OpenAI API Key in the sidebar to use this feature.")
+        st.info("Please configure your OpenAI API key in the sidebar or secrets.toml.")
         st.markdown("**Don't have a key?** You can still use the **Manual Inspection** tab!")
     else:
         st.markdown("### Automated Visual Inspection")
@@ -130,7 +139,6 @@ with tab_ai:
 # ==========================================
 with tab_manual:
     st.markdown(f"### {brand} Compliance Checklist")
-    st.caption("Interactive manual verification.")
     
     # Group rules by category
     categories = {}
