@@ -19,21 +19,34 @@ with st.sidebar:
     
     st.divider()
     
-    # --- IMPROVED API KEY HANDLING ---
-    # 1. Try to load strictly from secrets first
+    # --- AGGRESSIVE API KEY LOADING ---
     api_key = None
+    secrets_status = "searching"
+
+    # 1. Try loading from Streamlit Secrets
     try:
         if "OPENAI_API_KEY" in st.secrets:
             api_key = st.secrets["OPENAI_API_KEY"]
-    except Exception:
-        pass # Secrets file might not exist
+            secrets_status = "success"
+        else:
+            secrets_status = "missing_key"
+    except FileNotFoundError:
+        secrets_status = "no_secrets_file"
+    except Exception as e:
+        secrets_status = f"error_{str(e)}"
 
-    # 2. Only show manual entry if secrets failed
+    # 2. UI Feedback & Manual Fallback
     if api_key:
-        st.success("⚡ AI System Online (Key Found)")
+        st.success("⚡ AI System Online")
     else:
         st.warning("⚠️ AI Offline")
-        api_key = st.text_input("Enter OpenAI API Key", type="password", help="Add OPENAI_API_KEY to secrets.toml to hide this.")
+        # Debug Info: Tell user exactly why secrets failed
+        if secrets_status == "no_secrets_file":
+            st.caption("No `.streamlit/secrets.toml` found.")
+        elif secrets_status == "missing_key":
+            st.caption("Secrets file found, but `OPENAI_API_KEY` is missing.")
+        
+        api_key = st.text_input("Enter OpenAI API Key", type="password", help="Enter key manually since secrets failed.")
 
 # --- Header ---
 st.markdown("## Artwork Verification Dashboard")
@@ -42,7 +55,6 @@ st.markdown("## Artwork Verification Dashboard")
 cm = ChecklistManager()
 
 # 1. Load Checklist (Fail-Safe)
-# Uses Config paths first, then falls back to uploader if file is missing
 checklist_path = Config.CHECKLIST_FILE
 rules = []
 
@@ -51,7 +63,7 @@ if os.path.exists(checklist_path):
 else:
     st.error(f"⚠️ Missing File: '{checklist_path}'")
     st.info("Please upload your Checklist to proceed.")
-    # FIX: Added 'xlsx' to allowed types here
+    # FIX: Explicitly allow xlsx here
     uploaded_checklist = st.file_uploader("Upload Checklist (.xlsx)", type=["xlsx", "csv"], key="chk_upload")
     if uploaded_checklist:
         rules = cm.load_checklist(uploaded_checklist, brand)
@@ -63,9 +75,8 @@ common_errors = []
 if os.path.exists(error_tracker_path):
     common_errors = cm.get_common_errors(error_tracker_path)
 elif not rules: 
-    # Only show this upload prompt if we are in the setup phase (no rules yet)
     st.warning(f"⚠️ Missing File: '{error_tracker_path}'")
-    # FIX: Added 'xlsx' to allowed types here
+    # FIX: Explicitly allow xlsx here
     uploaded_tracker = st.file_uploader("Upload Error Tracker (.xlsx)", type=["xlsx", "csv"], key="err_upload")
     if uploaded_tracker:
         common_errors = cm.get_common_errors(uploaded_tracker)
@@ -83,8 +94,7 @@ tab_ai, tab_manual = st.tabs(["🤖 AI Analysis", "📋 Manual Inspection"])
 # ==========================================
 with tab_ai:
     if not api_key:
-        st.info("Please configure your OpenAI API key in the sidebar or secrets.toml.")
-        st.markdown("**Don't have a key?** You can still use the **Manual Inspection** tab!")
+        st.info("Please configure your OpenAI API key in the sidebar.")
     else:
         st.markdown("### Automated Visual Inspection")
         uploaded_file = st.file_uploader("Upload Proof (PDF/Image)", type=Config.ALLOWED_EXTENSIONS, key="ai_uploader")
