@@ -19,13 +19,15 @@ with st.sidebar:
     
     st.divider()
     
-    # Improved API Key Handling
+    # Improved API Key Handling: Checks Secrets first, then allows manual entry if needed
     api_key = st.secrets.get("OPENAI_API_KEY")
+    if not api_key:
+        api_key = st.text_input("Enter OpenAI API Key", type="password")
     
     if api_key:
         st.success("⚡ AI System Online")
     else:
-        st.warning("⚠️ AI Offline (No Key Found)")
+        st.warning("⚠️ AI Offline (No Key)")
         st.caption("Add 'OPENAI_API_KEY' to .streamlit/secrets.toml to enable AI features.")
 
 # --- Header ---
@@ -132,8 +134,6 @@ with tab_manual:
                 
                 with col_check:
                     label = f"**{rule['requirement']}**"
-                    if rule.get('required', False): 
-                        label = "🔴 " + label
                     
                     is_checked = st.checkbox(label, key=f"chk_{rule['id']}")
                     if is_checked:
@@ -142,7 +142,7 @@ with tab_manual:
                 with col_tip:
                     # Display helpful tip if available
                     if rule.get('tip'):
-                        st.info(f"💡 {rule['tip']}", icon="🧐")
+                        st.info(f"{rule['tip']}", icon="💡")
             
             st.divider()
 
